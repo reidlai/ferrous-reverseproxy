@@ -1,5 +1,7 @@
 # ferrous-reverseproxy
 
+[← Back to FerrousCX Root Architecture](https://github.com/reidlai/ferrous-cx)
+
 > **Edge Reverse Proxy, TLS Termination & OWASP WAF Stack for FerrousCX Platform**  
 > Powered by [Zentinel](https://github.com/zentinelproxy/zentinel), an enterprise-grade, memory-safe reverse proxy written in pure Rust on top of Cloudflare's **Pingora** framework, featuring crash-isolated security agents, native OWASP Core Rule Set (CRS) enforcement via `zentinelsec`, and zero-downtime Day-0 ad-hoc rule hot-patching.
 
