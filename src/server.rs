@@ -26,6 +26,13 @@ impl ZentinelServer {
             config.waf.enabled,
             config.waf.block_mode == "block",
         )?);
+
+        // Start background Day-0 rule file watcher if rules_dir exists
+        if std::path::Path::new(&config.waf.rules_dir).exists()
+            && let Err(e) = waf.start_file_watcher(&config.waf.rules_dir) {
+                tracing::warn!("Failed to start Day-0 rule file watcher: {}", e);
+            }
+
         let (shutdown_tx, _) = broadcast::channel(16);
 
         Ok(Self {

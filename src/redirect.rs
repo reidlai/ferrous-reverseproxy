@@ -96,11 +96,10 @@ pub async fn run_redirect_listener(
                                     async move { Ok::<_, hyper::Error>(s.handle_request(&req)) }
                                 }),
                             );
-                            if let Ok(res) = tokio::time::timeout(std::time::Duration::from_secs(5), conn).await {
-                                if let Err(err) = res {
+                            if let Ok(res) = tokio::time::timeout(std::time::Duration::from_secs(5), conn).await
+                                && let Err(err) = res {
                                     tracing::debug!("Redirect connection error from {}: {}", client_addr, err);
                                 }
-                            }
                         });
                     }
                     Err(err) => {

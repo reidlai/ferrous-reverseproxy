@@ -38,8 +38,8 @@ impl Router {
                 path == prefix_trimmed || path.starts_with(&route.prefix)
             };
 
-            if matches {
-                if let Some(upstream) = self.upstreams.get(&route.upstream) {
+            if matches
+                && let Some(upstream) = self.upstreams.get(&route.upstream) {
                     let forwarded_path = if route.strip_prefix {
                         let stripped = path
                             .strip_prefix(&route.prefix)
@@ -63,7 +63,6 @@ impl Router {
                         forwarded_path,
                     });
                 }
-            }
         }
         None
     }

@@ -49,15 +49,68 @@ impl ReverseProxyService {
         client_addr: SocketAddr,
     ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error>
     where
-        B: hyper::body::Body<Data = Bytes> + Send + 'static,
-        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+        B: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
+        B::Error: std::fmt::Debug + Into<Box<dyn std::error::Error + Send + Sync>>,
     {
         let method = req.method().to_string();
         let uri = req.uri().to_string();
         let headers = req.headers().clone();
 
-        // 1. WAF Inspection
-        let waf_result = self.waf.inspect_request(&method, &uri, &headers).await;
+        // 1. Healthcheck Endpoint Check (Internal reverse proxy probe on /health or /healthz)
+        if req.uri().path() == "/health" || req.uri().path() == "/healthz" {
+            let res = Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/json")
+                .body(BoxBody::new(
+                    Full::new(Bytes::from(r#"{"status":"healthy","service":"ferrous-reverseproxy"}"#))
+                        .map_err(|e| match e {}),
+                ))
+                .unwrap();
+            return Ok(res);
+        }
+
+        // 2. WAF Inspection (Phase 1 Headers/URI & Phase 2 Body for mutating requests)
+        let is_mutating = req.method() == hyper::Method::POST
+            || req.method() == hyper::Method::PUT
+            || req.method() == hyper::Method::PATCH;
+
+        let (parts, body) = req.into_parts();
+        let (reconstructed_body, waf_result) = if is_mutating {
+            // Buffer mutating body for WAF inspection (max 1MB)
+            match body.collect().await {
+                Ok(collected) => {
+                    let bytes = collected.to_bytes();
+                    let res = self
+                        .waf
+                        .inspect_request_with_body(&method, &uri, &headers, Some(&bytes))
+                        .await;
+                    let reconstructed: BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>> =
+                        BoxBody::new(Full::new(bytes).map_err(|e| match e {}));
+                    (reconstructed, res)
+                }
+                Err(err) => {
+                    tracing::warn!("Failed to read request body: {:?}", err);
+                    let empty: BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>> =
+                        BoxBody::new(Full::new(Bytes::new()).map_err(|e| match e {}));
+                    (
+                        empty,
+                        self.waf
+                            .inspect_request_with_body(&method, &uri, &headers, None)
+                            .await,
+                    )
+                }
+            }
+        } else {
+            let boxed: BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>> =
+                BoxBody::new(body.map_err(Into::into));
+            (
+                boxed,
+                self.waf
+                    .inspect_request_with_body(&method, &uri, &headers, None)
+                    .await,
+            )
+        };
+
         if waf_result.blocked {
             tracing::warn!(
                 "WAF BLOCKED {} {} from {}: {}",
@@ -81,21 +134,10 @@ impl ReverseProxyService {
             return Ok(res);
         }
 
-        // 2. Healthcheck Endpoint Check (Internal reverse proxy probe on /health or /healthz)
-        if req.uri().path() == "/health" || req.uri().path() == "/healthz" {
-            let res = Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "application/json")
-                .body(BoxBody::new(
-                    Full::new(Bytes::from(r#"{"status":"healthy","service":"ferrous-reverseproxy"}"#))
-                        .map_err(|e| match e {}),
-                ))
-                .unwrap();
-            return Ok(res);
-        }
+        let reconstructed_req = Request::from_parts(parts, reconstructed_body);
 
         // 3. Route Resolution
-        let path = req.uri().path();
+        let path = reconstructed_req.uri().path();
         let resolved = match self.router.resolve(path) {
             Some(r) => r,
             None => {
@@ -113,7 +155,7 @@ impl ReverseProxyService {
         };
 
         // 4. Forward Request to Upstream
-        self.forward_to_upstream(req, client_addr, resolved).await
+        self.forward_to_upstream(reconstructed_req, client_addr, resolved).await
     }
 
     async fn forward_to_upstream<B>(
@@ -275,7 +317,7 @@ impl ReverseProxyService {
             .headers_ref()
             .and_then(|h| h.get("Content-Type"))
             .and_then(|v| v.to_str().ok())
-            .map_or(false, |ct| ct.contains("text/event-stream"));
+            .is_some_and(|ct| ct.contains("text/event-stream"));
 
         if is_sse {
             client_res
