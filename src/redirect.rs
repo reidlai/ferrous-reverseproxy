@@ -19,10 +19,7 @@ impl RedirectService {
         Self { https_port }
     }
 
-    pub fn handle_request<B>(
-        &self,
-        req: &Request<B>,
-    ) -> Response<Empty<Bytes>> {
+    pub fn handle_request<B>(&self, req: &Request<B>) -> Response<Empty<Bytes>> {
         let host_header = req
             .headers()
             .get(HOST)
@@ -41,15 +38,15 @@ impl RedirectService {
         };
 
         let uri = req.uri();
-        let path_and_query = uri
-            .path_and_query()
-            .map(|pq| pq.as_str())
-            .unwrap_or("/");
+        let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
 
         let location = if self.https_port == 443 {
             format!("https://{}{}", host_name, path_and_query)
         } else {
-            format!("https://{}:{}{}", host_name, self.https_port, path_and_query)
+            format!(
+                "https://{}:{}{}",
+                host_name, self.https_port, path_and_query
+            )
         };
 
         Response::builder()

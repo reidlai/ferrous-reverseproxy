@@ -1,0 +1,88 @@
+name: ferrous-reverseproxy DevSecOps CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'epic-*'
+  pull_request:
+    branches:
+      - main
+      - 'epic-*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  devsecops-quality-and-security-gate:
+    name: Tier 1 & 2 DevSecOps Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: x86_64-unknown-linux-musl
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Install cargo-audit and cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,cargo-deny
+
+      - name: "[1/6] Rust Format Gate (cargo fmt)"
+        run: cargo fmt --all -- --check
+
+      - name: "[2/6] Rust Static Analysis (cargo clippy)"
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: "[3/6] Rust Test Suite (cargo test)"
+        run: cargo test --all-targets --verbose
+
+      - name: "[4/6] Supply Chain Audit (cargo deny)"
+        run: cargo deny check
+
+      - name: "[5/6] Dockerfile Linting (hadolint)"
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: error
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Container Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: ferrous-reverseproxy:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: "[6/6] Container Vulnerability Scan (Trivy)"
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ferrous-reverseproxy:latest
+          format: table
+          exit-code: 1
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL

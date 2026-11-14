@@ -1,6 +1,8 @@
-use ferrous_reverseproxy::config::{RouteRule, ServerConfig, UpstreamConfig, WafConfig, ZentinelConfig};
+use ferrous_reverseproxy::config::{
+    RouteRule, ServerConfig, UpstreamConfig, WafConfig, ZentinelConfig,
+};
 use ferrous_reverseproxy::server::ZentinelServer;
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
+use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::body::Bytes;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
@@ -8,8 +10,8 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::net::TcpListener;
 
 // Spawns a mock upstream server returning a JSON echo of the request details
@@ -59,7 +61,8 @@ async fn spawn_mock_upstream() -> (SocketAddr, Arc<AtomicUsize>) {
                                     .to_string();
 
                                 async move {
-                                    let body_bytes = req.into_body().collect().await.unwrap().to_bytes();
+                                    let body_bytes =
+                                        req.into_body().collect().await.unwrap().to_bytes();
                                     let body_str = String::from_utf8_lossy(&body_bytes).to_string();
 
                                     let echo = serde_json::json!({
@@ -169,7 +172,10 @@ async fn test_e2e_live_tls_proxy_and_waf() {
 
     let redirect_url = format!("http://127.0.0.1:{}/api/v1/ping", http_port);
     let redirect_res = client_no_redirect.get(&redirect_url).send().await.unwrap();
-    assert_eq!(redirect_res.status(), reqwest::StatusCode::MOVED_PERMANENTLY);
+    assert_eq!(
+        redirect_res.status(),
+        reqwest::StatusCode::MOVED_PERMANENTLY
+    );
     let location = redirect_res
         .headers()
         .get("Location")
@@ -184,7 +190,10 @@ async fn test_e2e_live_tls_proxy_and_waf() {
         .build()
         .unwrap();
 
-    let https_url = format!("https://127.0.0.1:{}/api/v1/orders?filter=active", https_port);
+    let https_url = format!(
+        "https://127.0.0.1:{}/api/v1/orders?filter=active",
+        https_port
+    );
     let post_payload = r#"{"order_id":"ord-123","amount":99.50}"#;
     let https_res = client_tls
         .post(&https_url)
@@ -198,7 +207,12 @@ async fn test_e2e_live_tls_proxy_and_waf() {
     assert_eq!(https_res.status(), reqwest::StatusCode::OK);
     // Verify unbuffered streaming header
     assert_eq!(
-        https_res.headers().get("X-Accel-Buffering").unwrap().to_str().unwrap(),
+        https_res
+            .headers()
+            .get("X-Accel-Buffering")
+            .unwrap()
+            .to_str()
+            .unwrap(),
         "no"
     );
 
@@ -214,7 +228,10 @@ async fn test_e2e_live_tls_proxy_and_waf() {
     assert_eq!(upstream_calls.load(Ordering::SeqCst), 1);
 
     // 3. Test OWASP WAF Block over HTTPS
-    let attack_url = format!("https://127.0.0.1:{}/api/v1/orders?query=1%20UNION%20SELECT%20*%20FROM%20users", https_port);
+    let attack_url = format!(
+        "https://127.0.0.1:{}/api/v1/orders?query=1%20UNION%20SELECT%20*%20FROM%20users",
+        https_port
+    );
     let attack_res = client_tls.get(&attack_url).send().await.unwrap();
     assert_eq!(attack_res.status(), reqwest::StatusCode::FORBIDDEN);
     // Upstream calls must remain 1 because attack was blocked at perimeter!

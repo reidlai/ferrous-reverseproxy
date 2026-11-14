@@ -1,0 +1,37 @@
+# Cargo Deny Configuration for ferrous-reverseproxy
+# Enforces Tier 1/2 DevSecOps supply-chain assurance and license compliance (AD-13, NFR-10..12).
+
+[advisories]
+yanked = "deny"
+unmaintained = "all"
+ignore = [
+    "RUSTSEC-2024-0384", # instant (transitive via notify 7.0)
+    "RUSTSEC-2025-0134", # rustls-pemfile (transitive via rustls 0.23, thin wrapper for rustls-pki-types)
+    "RUSTSEC-2024-0449", # unsafe-libyaml (transitive via serde_yaml)
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "OpenSSL",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "Zlib",
+]
+confidence-threshold = 0.8
+unused-allowed-license = "allow"
+
+[bans]
+multiple-versions = "warn"
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

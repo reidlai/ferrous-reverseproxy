@@ -1,0 +1,38 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: reverseproxy-fmt
+        name: Rust Format Gate (cargo fmt)
+        entry: cargo fmt --all -- --check
+        language: system
+        files: \.rs$
+        pass_filenames: false
+
+      - id: reverseproxy-clippy
+        name: Rust Clippy Gate (cargo clippy)
+        entry: cargo clippy --all-targets -- -D warnings
+        language: system
+        files: \.rs$
+        pass_filenames: false
+
+      - id: reverseproxy-test
+        name: Rust Test Suite (cargo test)
+        entry: cargo test
+        language: system
+        files: \.rs$
+        pass_filenames: false

@@ -2,8 +2,8 @@ use crate::router::{ResolvedRoute, Router};
 use crate::waf::WafEngine;
 use bytes::Bytes;
 use http_body_util::combinators::BoxBody;
-use http_body_util::{BodyExt, Full};
-use hyper::header::{HeaderValue, HOST};
+use http_body_util::{BodyExt, Full, Limited};
+use hyper::header::{HOST, HeaderValue};
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use std::net::SocketAddr;
@@ -62,8 +62,10 @@ impl ReverseProxyService {
                 .status(StatusCode::OK)
                 .header("Content-Type", "application/json")
                 .body(BoxBody::new(
-                    Full::new(Bytes::from(r#"{"status":"healthy","service":"ferrous-reverseproxy"}"#))
-                        .map_err(|e| match e {}),
+                    Full::new(Bytes::from(
+                        r#"{"status":"healthy","service":"ferrous-reverseproxy"}"#,
+                    ))
+                    .map_err(|e| match e {}),
                 ))
                 .unwrap();
             return Ok(res);
@@ -74,10 +76,13 @@ impl ReverseProxyService {
             || req.method() == hyper::Method::PUT
             || req.method() == hyper::Method::PATCH;
 
+        const MAX_WAF_BODY_SIZE: usize = 1024 * 1024; // 1MB body limit (DoS protection)
+
         let (parts, body) = req.into_parts();
         let (reconstructed_body, waf_result) = if is_mutating {
             // Buffer mutating body for WAF inspection (max 1MB)
-            match body.collect().await {
+            let limited = Limited::new(body, MAX_WAF_BODY_SIZE);
+            match limited.collect().await {
                 Ok(collected) => {
                     let bytes = collected.to_bytes();
                     let res = self
@@ -89,15 +94,22 @@ impl ReverseProxyService {
                     (reconstructed, res)
                 }
                 Err(err) => {
-                    tracing::warn!("Failed to read request body: {:?}", err);
-                    let empty: BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>> =
-                        BoxBody::new(Full::new(Bytes::new()).map_err(|e| match e {}));
-                    (
-                        empty,
-                        self.waf
-                            .inspect_request_with_body(&method, &uri, &headers, None)
-                            .await,
-                    )
+                    tracing::warn!("Failed to read request body (limit 1MB): {:?}", err);
+                    let body_json = serde_json::json!({
+                        "error": "Payload Too Large",
+                        "status": 413,
+                        "message": "Request body exceeds maximum allowed size (1MB)"
+                    });
+                    let body_bytes = serde_json::to_vec(&body_json).unwrap_or_default();
+                    let res = Response::builder()
+                        .status(StatusCode::PAYLOAD_TOO_LARGE)
+                        .header("Content-Type", "application/json")
+                        .header("X-Content-Type-Options", "nosniff")
+                        .body(BoxBody::new(
+                            Full::new(Bytes::from(body_bytes)).map_err(|e| match e {}),
+                        ))
+                        .unwrap();
+                    return Ok(res);
                 }
             }
         } else {
@@ -129,7 +141,9 @@ impl ReverseProxyService {
                 .status(StatusCode::FORBIDDEN)
                 .header("Content-Type", "application/json")
                 .header("X-Content-Type-Options", "nosniff")
-                .body(BoxBody::new(Full::new(Bytes::from(body_bytes)).map_err(|e| match e {})))
+                .body(BoxBody::new(
+                    Full::new(Bytes::from(body_bytes)).map_err(|e| match e {}),
+                ))
                 .unwrap();
             return Ok(res);
         }
@@ -155,7 +169,8 @@ impl ReverseProxyService {
         };
 
         // 4. Forward Request to Upstream
-        self.forward_to_upstream(reconstructed_req, client_addr, resolved).await
+        self.forward_to_upstream(reconstructed_req, client_addr, resolved)
+            .await
     }
 
     async fn forward_to_upstream<B>(
@@ -172,66 +187,95 @@ impl ReverseProxyService {
         let timeout_dur = Duration::from_millis(route.timeout_ms);
 
         // Connect to primary target or fallback with configured timeout
-        let stream = match tokio::time::timeout(timeout_dur, TcpStream::connect(&route.upstream_target)).await {
-            Ok(Ok(s)) => s,
-            Ok(Err(err)) => {
-                if let Some(fallback) = &route.fallback_target {
-                    tracing::debug!(
-                        "Upstream target {} failed ({}), trying fallback {}",
-                        route.upstream_target,
-                        err,
-                        fallback
-                    );
-                    match tokio::time::timeout(timeout_dur, TcpStream::connect(fallback)).await {
-                        Ok(Ok(s)) => s,
-                        Ok(Err(fallback_err)) => {
-                            tracing::error!(
-                                "Both target {} and fallback {} failed: {}, {}",
-                                route.upstream_target,
-                                fallback,
-                                err,
-                                fallback_err
-                            );
-                            return Ok(Self::bad_gateway_response(
-                                &route.upstream_target,
-                                fallback_err,
-                            ));
+        let stream =
+            match tokio::time::timeout(timeout_dur, TcpStream::connect(&route.upstream_target))
+                .await
+            {
+                Ok(Ok(s)) => s,
+                Ok(Err(err)) => {
+                    if let Some(fallback) = &route.fallback_target {
+                        tracing::debug!(
+                            "Upstream target {} failed ({}), trying fallback {}",
+                            route.upstream_target,
+                            err,
+                            fallback
+                        );
+                        match tokio::time::timeout(timeout_dur, TcpStream::connect(fallback)).await
+                        {
+                            Ok(Ok(s)) => s,
+                            Ok(Err(fallback_err)) => {
+                                tracing::error!(
+                                    "Both target {} and fallback {} failed: {}, {}",
+                                    route.upstream_target,
+                                    fallback,
+                                    err,
+                                    fallback_err
+                                );
+                                return Ok(Self::bad_gateway_response(
+                                    &route.upstream_target,
+                                    fallback_err,
+                                ));
+                            }
+                            Err(_) => {
+                                return Ok(Self::bad_gateway_response(
+                                    fallback,
+                                    "Connection timed out",
+                                ));
+                            }
                         }
-                        Err(_) => {
-                            return Ok(Self::bad_gateway_response(fallback, "Connection timed out"));
-                        }
+                    } else {
+                        tracing::error!(
+                            "Failed to connect to upstream {}: {}",
+                            route.upstream_target,
+                            err
+                        );
+                        return Ok(Self::bad_gateway_response(&route.upstream_target, err));
                     }
-                } else {
-                    tracing::error!("Failed to connect to upstream {}: {}", route.upstream_target, err);
-                    return Ok(Self::bad_gateway_response(&route.upstream_target, err));
                 }
-            }
-            Err(_) => {
-                if let Some(fallback) = &route.fallback_target {
-                    match tokio::time::timeout(timeout_dur, TcpStream::connect(fallback)).await {
-                        Ok(Ok(s)) => s,
-                        Ok(Err(fallback_err)) => {
-                            return Ok(Self::bad_gateway_response(&route.upstream_target, fallback_err));
+                Err(_) => {
+                    if let Some(fallback) = &route.fallback_target {
+                        match tokio::time::timeout(timeout_dur, TcpStream::connect(fallback)).await
+                        {
+                            Ok(Ok(s)) => s,
+                            Ok(Err(fallback_err)) => {
+                                return Ok(Self::bad_gateway_response(
+                                    &route.upstream_target,
+                                    fallback_err,
+                                ));
+                            }
+                            Err(_) => {
+                                return Ok(Self::bad_gateway_response(
+                                    fallback,
+                                    "Connection timed out",
+                                ));
+                            }
                         }
-                        Err(_) => {
-                            return Ok(Self::bad_gateway_response(fallback, "Connection timed out"));
-                        }
+                    } else {
+                        return Ok(Self::bad_gateway_response(
+                            &route.upstream_target,
+                            "Connection timed out",
+                        ));
                     }
-                } else {
-                    return Ok(Self::bad_gateway_response(&route.upstream_target, "Connection timed out"));
                 }
-            }
-        };
+            };
 
         let io = TokioIo::new(stream);
-        let (mut sender, conn) = match tokio::time::timeout(timeout_dur, hyper::client::conn::http1::handshake(io)).await {
+        let (mut sender, conn) = match tokio::time::timeout(
+            timeout_dur,
+            hyper::client::conn::http1::handshake(io),
+        )
+        .await
+        {
             Ok(Ok(pair)) => pair,
             Ok(Err(e)) => {
                 tracing::error!("HTTP/1 handshake with upstream failed: {}", e);
                 return Ok(Self::bad_gateway_response(&route.upstream_target, e));
             }
             Err(_) => {
-                return Ok(Self::bad_gateway_response(&route.upstream_target, "Handshake timed out"));
+                return Ok(Self::bad_gateway_response(
+                    &route.upstream_target,
+                    "Handshake timed out",
+                ));
             }
         };
 
@@ -248,7 +292,11 @@ impl ReverseProxyService {
         *forward_req.version_mut() = hyper::Version::HTTP_11;
 
         // Path and query
-        let query = parts.uri.query().map(|q| format!("?{}", q)).unwrap_or_default();
+        let query = parts
+            .uri
+            .query()
+            .map(|q| format!("?{}", q))
+            .unwrap_or_default();
         let target_uri = format!("{}{}", route.forwarded_path, query);
         if let Ok(uri) = target_uri.parse() {
             *forward_req.uri_mut() = uri;
@@ -260,7 +308,9 @@ impl ReverseProxyService {
 
         // Preserve original host in X-Forwarded-Host before rewriting Host
         if let Some(orig_host) = forward_req.headers().get(HOST).cloned() {
-            forward_req.headers_mut().insert("X-Forwarded-Host", orig_host);
+            forward_req
+                .headers_mut()
+                .insert("X-Forwarded-Host", orig_host);
         }
 
         if let Ok(host_val) = route.upstream_target.parse() {
@@ -291,17 +341,25 @@ impl ReverseProxyService {
             .insert("X-Forwarded-Port", HeaderValue::from(self.https_port));
 
         // Forward request with configured timeout
-        let upstream_res = match tokio::time::timeout(timeout_dur, sender.send_request(forward_req)).await {
-            Ok(Ok(res)) => res,
-            Ok(Err(e)) => {
-                tracing::error!("Error forwarding request to upstream: {}", e);
-                return Ok(Self::bad_gateway_response(&route.upstream_target, e));
-            }
-            Err(_) => {
-                tracing::error!("Request to upstream {} timed out after {}ms", route.upstream_target, route.timeout_ms);
-                return Ok(Self::bad_gateway_response(&route.upstream_target, "Request timed out"));
-            }
-        };
+        let upstream_res =
+            match tokio::time::timeout(timeout_dur, sender.send_request(forward_req)).await {
+                Ok(Ok(res)) => res,
+                Ok(Err(e)) => {
+                    tracing::error!("Error forwarding request to upstream: {}", e);
+                    return Ok(Self::bad_gateway_response(&route.upstream_target, e));
+                }
+                Err(_) => {
+                    tracing::error!(
+                        "Request to upstream {} timed out after {}ms",
+                        route.upstream_target,
+                        route.timeout_ms
+                    );
+                    return Ok(Self::bad_gateway_response(
+                        &route.upstream_target,
+                        "Request timed out",
+                    ));
+                }
+            };
 
         // Construct client response
         let (res_parts, res_body) = upstream_res.into_parts();
@@ -324,10 +382,10 @@ impl ReverseProxyService {
                 .headers_mut()
                 .unwrap()
                 .insert("X-Accel-Buffering", HeaderValue::from_static("no"));
-            client_res
-                .headers_mut()
-                .unwrap()
-                .insert("Cache-Control", HeaderValue::from_static("no-cache, no-transform"));
+            client_res.headers_mut().unwrap().insert(
+                "Cache-Control",
+                HeaderValue::from_static("no-cache, no-transform"),
+            );
         } else if route.unbuffered_streaming {
             client_res
                 .headers_mut()

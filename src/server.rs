@@ -29,9 +29,10 @@ impl ZentinelServer {
 
         // Start background Day-0 rule file watcher if rules_dir exists
         if std::path::Path::new(&config.waf.rules_dir).exists()
-            && let Err(e) = waf.start_file_watcher(&config.waf.rules_dir) {
-                tracing::warn!("Failed to start Day-0 rule file watcher: {}", e);
-            }
+            && let Err(e) = waf.start_file_watcher(&config.waf.rules_dir)
+        {
+            tracing::warn!("Failed to start Day-0 rule file watcher: {}", e);
+        }
 
         let (shutdown_tx, _) = broadcast::channel(16);
 
@@ -57,13 +58,15 @@ impl ZentinelServer {
 
     pub async fn run(self) -> anyhow::Result<()> {
         let http_addr: SocketAddr = format!("0.0.0.0:{}", self.config.server.http_port).parse()?;
-        let https_addr: SocketAddr = format!("0.0.0.0:{}", self.config.server.https_port).parse()?;
+        let https_addr: SocketAddr =
+            format!("0.0.0.0:{}", self.config.server.https_port).parse()?;
 
         // 1. Spawn HTTP Port 80 Redirect Listener
         let redirect_shutdown_rx = self.shutdown_tx.subscribe();
         let https_port = self.config.server.https_port;
         tokio::spawn(async move {
-            if let Err(e) = run_redirect_listener(http_addr, https_port, redirect_shutdown_rx).await {
+            if let Err(e) = run_redirect_listener(http_addr, https_port, redirect_shutdown_rx).await
+            {
                 tracing::error!("HTTP redirect listener failed: {}", e);
             }
         });

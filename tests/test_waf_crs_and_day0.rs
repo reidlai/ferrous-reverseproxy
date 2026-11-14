@@ -1,6 +1,8 @@
-use ferrous_reverseproxy::config::{RouteRule, ServerConfig, UpstreamConfig, WafConfig, ZentinelConfig};
+use ferrous_reverseproxy::config::{
+    RouteRule, ServerConfig, UpstreamConfig, WafConfig, ZentinelConfig,
+};
 use ferrous_reverseproxy::server::ZentinelServer;
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
+use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::body::Bytes;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
@@ -8,8 +10,8 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::net::TcpListener;
 
 // Spawns mock API backend
@@ -41,8 +43,10 @@ async fn spawn_mock_api() -> (SocketAddr, Arc<AtomicUsize>) {
                                         .status(StatusCode::OK)
                                         .header("Content-Type", "application/json")
                                         .body(BoxBody::new(
-                                            Full::new(Bytes::from(serde_json::to_vec(&echo).unwrap()))
-                                                .map_err(|e| match e {}),
+                                            Full::new(Bytes::from(
+                                                serde_json::to_vec(&echo).unwrap(),
+                                            ))
+                                            .map_err(|e| match e {}),
                                         ))
                                         .unwrap();
                                     Ok::<_, hyper::Error>(res)

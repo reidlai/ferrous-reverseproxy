@@ -1,0 +1,33 @@
+services:
+  ferrous-reverseproxy:
+    image: ferrous-reverseproxy:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ferrous-reverseproxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - RUST_LOG=info
+      - ZENTINEL_CONFIG=/etc/zentinel/zentinel.yaml
+    volumes:
+      - ./config:/etc/zentinel:ro
+      - ./certs:/etc/ssl/certs:ro
+    # Day-0 Hardened Runtime Defense Constraints (AD-24)
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=64M
+    healthcheck:
+      test: ["CMD", "/app/ferrous-reverseproxy", "--healthcheck", "--health-port", "443"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

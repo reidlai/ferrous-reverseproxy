@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -72,8 +72,8 @@ pub fn generate_self_signed_config() -> Result<Arc<ServerConfig>> {
 }
 
 fn load_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
-    let file = File::open(path)
-        .with_context(|| format!("Failed to open cert file {}", path.display()))?;
+    let file =
+        File::open(path).with_context(|| format!("Failed to open cert file {}", path.display()))?;
     let mut reader = BufReader::new(file);
     let certs = rustls_pemfile::certs(&mut reader)
         .collect::<std::result::Result<Vec<_>, _>>()
@@ -82,14 +82,12 @@ fn load_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
 }
 
 fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>> {
-    let file = File::open(path)
-        .with_context(|| format!("Failed to open key file {}", path.display()))?;
+    let file =
+        File::open(path).with_context(|| format!("Failed to open key file {}", path.display()))?;
     let mut reader = BufReader::new(file);
 
     loop {
-        match rustls_pemfile::read_one(&mut reader)
-            .context("Error reading private key item")?
-        {
+        match rustls_pemfile::read_one(&mut reader).context("Error reading private key item")? {
             Some(rustls_pemfile::Item::Pkcs1Key(k)) => return Ok(PrivateKeyDer::Pkcs1(k)),
             Some(rustls_pemfile::Item::Pkcs8Key(k)) => return Ok(PrivateKeyDer::Pkcs8(k)),
             Some(rustls_pemfile::Item::Sec1Key(k)) => return Ok(PrivateKeyDer::Sec1(k)),

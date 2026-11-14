@@ -21,7 +21,7 @@ impl Router {
     pub fn new(config: &ZentinelConfig) -> Self {
         let mut routes = config.routes.clone();
         // Sort routes by prefix length descending to ensure longest prefix matches first
-        routes.sort_by(|a, b| b.prefix.len().cmp(&a.prefix.len()));
+        routes.sort_by_key(|a| std::cmp::Reverse(a.prefix.len()));
         Self {
             routes,
             upstreams: config.upstreams.clone(),
@@ -38,31 +38,30 @@ impl Router {
                 path == prefix_trimmed || path.starts_with(&route.prefix)
             };
 
-            if matches
-                && let Some(upstream) = self.upstreams.get(&route.upstream) {
-                    let forwarded_path = if route.strip_prefix {
-                        let stripped = path
-                            .strip_prefix(&route.prefix)
-                            .or_else(|| path.strip_prefix(prefix_trimmed))
-                            .unwrap_or(path);
-                        if stripped.starts_with('/') {
-                            stripped.to_string()
-                        } else {
-                            format!("/{}", stripped)
-                        }
+            if matches && let Some(upstream) = self.upstreams.get(&route.upstream) {
+                let forwarded_path = if route.strip_prefix {
+                    let stripped = path
+                        .strip_prefix(&route.prefix)
+                        .or_else(|| path.strip_prefix(prefix_trimmed))
+                        .unwrap_or(path);
+                    if stripped.starts_with('/') {
+                        stripped.to_string()
                     } else {
-                        path.to_string()
-                    };
+                        format!("/{}", stripped)
+                    }
+                } else {
+                    path.to_string()
+                };
 
-                    return Some(ResolvedRoute {
-                        upstream_target: upstream.target.clone(),
-                        fallback_target: upstream.fallback.clone(),
-                        timeout_ms: upstream.timeout_ms,
-                        tls: upstream.tls,
-                        unbuffered_streaming: route.unbuffered_streaming,
-                        forwarded_path,
-                    });
-                }
+                return Some(ResolvedRoute {
+                    upstream_target: upstream.target.clone(),
+                    fallback_target: upstream.fallback.clone(),
+                    timeout_ms: upstream.timeout_ms,
+                    tls: upstream.tls,
+                    unbuffered_streaming: route.unbuffered_streaming,
+                    forwarded_path,
+                });
+            }
         }
         None
     }
