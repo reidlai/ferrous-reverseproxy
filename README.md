@@ -154,7 +154,31 @@ ferrous-reverseproxy/
 
 ## 🛠️ Developer Quickstart
 
-### 1. Run via Docker Locally
+### 1. 3-Minute Standalone Quickstart & Audit
+Execute the automated quickstart verification script to audit unit tests, unbuffered SSE pass-through, and WAF rules:
+
+```bash
+# On Linux / macOS:
+./scripts/quickstart.sh
+
+# On Windows PowerShell:
+.\scripts\quickstart.ps1
+```
+
+### 2. DevSecOps Build & Vulnerability Scan
+Run the container build and vulnerability scan pipeline (with `-DryRun` support when Docker daemon is not active):
+
+```bash
+# Linux / macOS:
+./scripts/build-and-scan.sh --dry-run
+./scripts/build-and-scan.sh
+
+# Windows PowerShell:
+.\scripts\build-and-scan.ps1 -DryRun
+.\scripts\build-and-scan.ps1
+```
+
+### 3. Run via Docker Locally
 ```bash
 # Build the container locally
 docker build -t ferrous-reverseproxy:latest .
@@ -168,7 +192,7 @@ docker run -d \
   ferrous-reverseproxy:latest
 ```
 
-### 2. Verify WAF Protection
+### 4. Verify WAF Protection
 ```bash
 # Legitimate API request (Should return HTTP 200/202)
 curl -k -i https://localhost/api/v1/commands/orders/issue-credit \

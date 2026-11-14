@@ -1,0 +1,56 @@
+# Zentinel Edge Reverse Proxy Configuration for FerrousCX Platform
+server:
+  http_port: 80
+  https_port: 443
+  tls:
+    enabled: true
+    cert_path: "/etc/ssl/certs/zentinel.crt"
+    key_path: "/etc/ssl/certs/zentinel.key"
+    generate_self_signed_if_missing: true
+
+waf:
+  enabled: true
+  rules_dir: "/etc/zentinel/rules.d"
+  crs_dir: "/etc/zentinel/crs"
+  block_mode: "block" # "block" returns 403 Forbidden, "detection_only" logs warnings
+
+upstreams:
+  frontend:
+    target: "ferrous-frontend:5173"
+    fallback: "127.0.0.1:5173"
+    timeout_ms: 30000
+  api:
+    target: "ferrous-api:8080"
+    fallback: "127.0.0.1:8080"
+    timeout_ms: 60000
+  iam:
+    target: "ferrous-iam:8443"
+    fallback: "127.0.0.1:8443"
+    tls: true
+    timeout_ms: 30000
+  agent:
+    target: "ferrous-agent:8081"
+    fallback: "127.0.0.1:8081"
+    timeout_ms: 120000
+
+routes:
+  - prefix: "/api/"
+    upstream: "api"
+    strip_prefix: false
+    unbuffered_streaming: true
+  - prefix: "/oauth2/"
+    upstream: "iam"
+    strip_prefix: false
+  - prefix: "/auth/"
+    upstream: "iam"
+    strip_prefix: false
+  - prefix: "/idp/"
+    upstream: "iam"
+    strip_prefix: false
+  - prefix: "/v1/chat/"
+    upstream: "agent"
+    strip_prefix: false
+    unbuffered_streaming: true
+  - prefix: "/"
+    upstream: "frontend"
+    strip_prefix: false
