@@ -10,7 +10,7 @@ RUN mkdir -p src && echo "fn main() {}" > src/main.rs && echo "pub fn lib() {}" 
 
 COPY src ./src
 COPY config ./config
-RUN cargo build --release --target x86_64-unknown-linux-musl
+RUN touch src/main.rs src/lib.rs && cargo build --release --target x86_64-unknown-linux-musl
 
 # Stage 2: Minimal Zero-OS Hardened Runtime (< 45MB FROM scratch, AD-24)
 FROM scratch
