@@ -162,6 +162,9 @@ async fn main() -> anyhow::Result<()> {
         config.server.https_port = p;
     }
 
+    #[cfg(unix)]
+    let rules_dir = config.waf.rules_dir.clone();
+
     let server = ZentinelServer::new(config)?;
 
     // Handle Ctrl+C / SIGINT for graceful shutdown
@@ -177,7 +180,6 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(unix)]
     {
         let waf_engine = server.waf();
-        let rules_dir = config.waf.rules_dir.clone();
         tokio::spawn(async move {
             use tokio::signal::unix::{SignalKind, signal};
             if let Ok(mut sighup) = signal(SignalKind::hangup()) {
